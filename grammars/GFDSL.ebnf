@@ -1,0 +1,74 @@
+query = @:patterns ;
+patterns = ';'.{triple} ;
+triple::Triple = '(' sub:[nvariable] ')-[' pre:[nvariable] ']->('  obj:[nvariable] ')';
+
+nvariable::Variable = name:/[a-zA-Z][a-zA-Z0-9_]*/;
+
+
+expression = '||'.{and_expression}+;
+and_expression = '&&'.{comparison}+;
+comparison = left:arithmetic_expression [op:('=' | '!=' | '<' | '>' | '<=' | '>=') right:arithmetic_expression]; # | 'IN' ExpressionList | 'NOT' 'IN' ExpressionList )
+arithmetic_expression = left:mult_expression [op:('+'|'-') right:arithmetic_expression];
+mult_expression = left:unary_expression [op:('*'|'/') right:mult_expression];
+unary_expression =   op:('!' | '+' | '-' | ()) expression:primary_expression;
+primary_expression = call | term | '(' @:expression ')';
+
+
+call::Call =  @:(one_arg_call | two_arg_call | aggregate_call | if_expr | bound_expr);
+
+one_arg_call::One_arg_call = name:one_arg_func '(' argument:expression ')';
+two_arg_call::Two_arg_call = name:two_arg_func '(' argument1:expression ',' argument2:expression ')';
+
+aggregate_call::Aggregate_call = name:aggregate_func '(' argument:expression ')';
+
+#Aggregate	  ::=  	  'COUNT' '(' 'DISTINCT'? ( '*' | Expression ) ')'
+#| 'GROUP_CONCAT' '(' 'DISTINCT'? Expression ( ';' 'SEPARATOR' '=' String )? ')'
+
+if_expr::If = if '(' condition:expression ',' succeed:expression ',' fail:expression ')';
+
+bound_expr::Bound = bound '(' variable:nvariable ')';
+
+if = ?"(?i)if";
+bound = ?"(?i)bound";
+
+one_arg_func = ?"(?i)STR|LANG|DATATYPE|IRI|URI|ABS|CEIL|FLOOR|ROUND|STRLEN|UCASE|LCASE|ENCODE_FOR_URI|YEAR|MONTH|DAY|HOURS|MINUTES|SECONDS|TIMEZONE|TZ|MD5|SHA1|SHA256|SHA384|SHA512|isIRI|isURI|isBLANK|isLITERAL|isNUMERIC";
+
+two_arg_func = ?"(?i)LANGMATCHES|CONTAINS|STRSTARTS|STRENDS|STRBEFORE|STRAFTER|STRLANG|STRDT|sameTerm";
+
+aggregate_func = ?"(?i)COUNT|SUM|MIN|MAX|AVG|SAMPLE";
+
+#Aggregate | 'BNODE' ( '(' Expression ')' | NIL ) | 'RAND' NIL  | 'CONCAT' ExpressionList | SubstringExpression | StrReplaceExpression | 'NOW' NIL | 'UUID' NIL | 'STRUUID' NIL |  'COALESCE' ExpressionList  | RegexExpression | ExistsFunc | NotExistsFunc
+
+term::Term = @:(literal | resource | nvariable);
+
+resource::Resource = value:(relative_iri | full_iri | prefixed | rdf_type);
+full_iri::Full_iri = '<' &base value:iri  '>';
+relative_iri::Relative_iri = '<' value:iri  '>';
+base = alphanum '://';
+prefixed::Prefixed =  prefix:prefix ':' postfix:postfix;
+prefix = @:alpha;
+postfix = @:alphanum;
+rdf_type::Rdf_type = 'a';
+
+
+literal::Literal = value:(boolean_literal | numeric_literal | Rdf_literal);
+boolean_literal::Boolean_literal = value:(true | false);
+numeric_literal::Numeric_literal = value:(DOUBLE | DECIMAL | INTEGER) ;
+Rdf_literal::Rdf_literal = value:String_literal [language_tag:language_tag | ( '^^' datatype:resource ) ];
+String_literal = "'''" @:(/((?!''')([^\\]|\\[tbnrf"'\\]))*/) "'''"
+                |'"""' @:(/((?!""")([^\\]|\\[tbnrf"'\\]))*/) '"""'
+                |"'" @:(/((?!')([^\\]|\\[tbnrf"'\\]))*/) "'"
+                |'"' @:(/((?!")([^\\]|\\[tbnrf"'\\]))*/) '"';
+language_tag = '@' @:(/[a-zA-Z]+(?:-[a-zA-Z]+)*/);
+
+INTEGER::Integer = value:(/[0-9]+/);
+DECIMAL::Decimal = value:((/[0-9]*\.[0-9]+/) | (/[0-9]+\.[0-9]*/));
+DOUBLE::Double = base:(DECIMAL | INTEGER) /[eE]/ sign:(['+'|'-']) exponent:INTEGER;
+
+true::TRUE = ?"(?i)true";
+false::FALSE = ?"(?i)false";
+
+alpha = /[a-zA-Z]*/;
+alphanum = /[a-zA-Z0-9_]+/;
+iri = /[^\x00-\x20<>"{}|^`\\]*/;
+escaped_char = /\\[tbnrf"'\\]/;

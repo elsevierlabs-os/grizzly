@@ -1,0 +1,176 @@
+@@comments :: /#.*?$/
+
+query = prologue:prologue body:(select_query | construct_query | update_query);
+
+prologue = {base_declaration | prefix_declaration};
+base_declaration::BaseDeclaration = BASE iri:full_iri;
+prefix_declaration::PrefixDeclaration = PREFIX prefix:prefix ':' iri:(relative_iri | full_iri);
+
+select_query::SelectQuery = select_clause:select_clause dataset_clause:dataset_clause where_clause:where_clause solution_modifier:solution_modifier;
+construct_query::ConstructQuery = construct_clause:construct_clause dataset_clause:dataset_clause where_clause:where_clause;
+update_query::UpdateQuery = @:';'.{request}+;
+request = delete_clause:[delete_clause] insert_clause:[insert_clause] where_clause:where_clause;
+
+select_clause = select @:select_group;
+select_group = modifier:[(distinct|reduced)] selection:(all | {variable_binding | variable }+);
+construct_clause = construct '{' @:construct_group '}';
+construct_group = @:{construct_triple};
+construct_triple = sub:(variable|resource) pre:(variable|resource) obj:(variable|resource|literal) '.';
+dataset_clause = {from iri:resource};
+insert_clause = insert '{' @:construct_group '}';
+delete_clause = delete '{' @:construct_group '}';
+
+where_clause = [where] ast:group;
+group::Group = [graph resource] '{' @:(select_query | patterns) '}';
+patterns = {optional_group | minus_group | union_group | group | triple | filter_expr | bind_expr | data_block} ;
+triple::Triple = sub:(variable|resource) pre:(variable|property_path) obj:(variable|resource|literal) '.';
+
+solution_modifier = groupby_clause:[groupby_clause] orderby_clause:[orderby_clause] limit_clause:[limit_clause];
+groupby_clause = groupby @:{call | variable
+                          | variable_binding | '(' expression ')' }+;
+orderby_clause = orderby @:{orderer};
+orderer = order:[asc | desc] variable:variable;
+limit_clause = limit @:integer;
+
+#BuiltInCall | FunctionCall | '(' Expression ( 'AS' Var )? ')' | Var
+
+optional_group::Optional = optional @:group;
+minus_group::Minus = minus @:group;
+union_group::Union = left:group union right:group;
+
+filter_expr::Filter = filter ( @:call | '(' @:expression ')' | @:exists_group);
+exists_group::ExistsGroup = predicate:(exists|not_exists) group:group;
+
+bind_expr::Bind = bind @:variable_binding;
+variable_binding = '(' expression:expression as variable:variable ')';
+data_block::Data_block = values @:(one_var_data | full_data);
+one_var_data = variables+:variable '{' values:{single_value} '}';
+full_data = '(' variables:{variable} ')' '{' values:{tuple} '}';
+tuple = '(' @:{data_value} ')';
+single_value = @+:data_value;
+data_value = @:resource | literal | undef;
+
+property_path = '|'.{path_sequence}+;
+path_sequence =  '/'.{path_item}+;
+path_item = inverse:path_inverse term:(subpath | resource) modifier:path_mod;
+subpath =  '(' @:property_path ')';
+path_inverse = '^' | ();
+path_mod = '*' | '+' | ();
+
+expression = '||'.{and_expression}+;
+and_expression = '&&'.{comparison}+;
+comparison = left:arithmetic_expression [op:('=' | '!=' | '<' | '>' | '<=' | '>=') right:arithmetic_expression
+                                        |op:(in | notin) right:expression_list];
+expression_list = '(' @:(','.{expression}+) ')' ;
+arithmetic_expression = left:mult_expression [op:('+'|'-') right:arithmetic_expression];
+mult_expression = left:unary_expression [op:('*'|'/') right:mult_expression];
+unary_expression =   op:('!' | '+' | '-' | ()) expression:primary_expression;
+primary_expression = term | call | '(' @:expression ')';
+
+call::Call =  @:(one_arg_call | two_arg_call | aggregate_call | if_expr | bound_expr);
+
+one_arg_call::One_arg_call = name:one_arg_func '(' argument:expression ')';
+two_arg_call::Two_arg_call = name:two_arg_func '(' argument1:expression ',' argument2:expression ')';
+
+aggregate_call::Aggregate_call = name:aggregate_func '(' [distinct:distinct] argument:expression ')';
+
+#Aggregate	  ::=  	  'COUNT' '(' 'DISTINCT'? ( '*' | Expression ) ')'
+#| 'GROUP_CONCAT' '(' 'DISTINCT'? Expression ( ';' 'SEPARATOR' '=' String )? ')'
+
+if_expr::If = if '(' condition:expression ',' succeed:expression ',' fail:expression ')';
+
+bound_expr::Bound = bound '(' variable:variable ')';
+
+if = ?"(?i)if";
+bound = ?"(?i)bound";
+
+one_arg_func = ?"(?i)STR|LANG|DATATYPE|IRI|URI|ABS|CEIL|FLOOR|ROUND|STRLEN|UCASE|LCASE|ENCODE_FOR_URI|YEAR|MONTH|DAY|HOURS|MINUTES|SECONDS|TIMEZONE|TZ|MD5|SHA1|SHA256|SHA384|SHA512|isIRI|isURI|isBLANK|isLITERAL|isNUMERIC";
+
+two_arg_func = ?"(?i)LANGMATCHES|CONTAINS|STRSTARTS|STRENDS|STRBEFORE|STRAFTER|STRLANG|STRDT|sameTerm";
+
+aggregate_func = ?"(?i)COUNT|SUM|MIN|MAX|AVG|SAMPLE";
+
+#Aggregate | 'BNODE' ( '(' Expression ')' | NIL ) | 'RAND' NIL  | 'CONCAT' ExpressionList | SubstringExpression | StrReplaceExpression | 'NOW' NIL | 'UUID' NIL | 'STRUUID' NIL |  'COALESCE' ExpressionList  | RegexExpression | ExistsFunc | NotExistsFunc
+
+term::Term = @:(variable | resource | literal);
+variable::Variable = sigel name:alphanum;
+
+resource::Resource = value:(full_iri | relative_iri | prefixed | rdf_type);
+full_iri::Full_iri = '<' &base value:iri  '>';
+relative_iri::Relative_iri = '<' value:iri  '>';
+base = alphanum '://';
+prefixed::Prefixed =  prefix:prefix ':' postfix:postfix;
+prefix = @:alpha;
+postfix = @:iri_chars;
+rdf_type::Rdf_type = 'a';
+
+
+literal::Literal = value:(boolean_literal | numeric_literal | Rdf_literal);
+boolean_literal::Boolean_literal = value:(true | false);
+numeric_literal::Numeric_literal = value:(double | decimal | integer) ;
+Rdf_literal::Rdf_literal = value:String_literal [language_tag:language_tag | ( '^^' datatype:resource ) ];
+String_literal = "'''" @:(/((?!''')([^\\]|\\[tbnrf"'\\]))*/) "'''"
+                |'"""' @:(/((?!""")([^\\]|\\[tbnrf"'\\]))*/) '"""'
+                |"'" @:(/((?!')([^\\]|\\[tbnrf"'\\]))*/) "'"
+                |'"' @:(/((?!")([^\\]|\\[tbnrf"'\\]))*/) '"';
+language_tag = '@' @:(/[a-zA-Z]+(?:-[a-zA-Z]+)*/);
+
+integer::Integer = value:(/[0-9]+/);
+decimal::Decimal = value:((/[0-9]*\.[0-9]+/) | (/[0-9]+\.[0-9]*/));
+double::Double = base:(decimal | integer) /[eE]/ sign:(['+'|'-']) exponent:integer;
+
+true::TRUE = ?"(?i)true";
+false::FALSE = ?"(?i)false";
+
+alpha = /[a-zA-Z]*/;
+alphanum = /[a-zA-Z0-9_]+/;
+iri_chars = /[a-zA-Z]([a-zA-Z0-9_\-\.]*[a-zA-Z0-9_])?/;
+iri = /[^\x00-\x20<>"{}|^`\\]*/;
+escaped_char = /\\[tbnrf"'\\]/;
+
+sigel = '?' | '$';
+EOL = /[\n\r]/;
+DQUOTE = /["\\]/;
+SQUOTE = /['\\]/;
+
+all::All = '*';
+
+KEYWORD = select | construct | DESCRIBE | where | union | optional | minus | BASE | PREFIX | distinct | reduced | as | from;
+select = ?"(?i)select";
+construct = ?"(?i)construct";
+DESCRIBE = ?"(?i)describe";
+where = ?"(?i)where";
+insert = ?"(?i)insert";
+delete = ?"(?i)delete";
+
+
+graph = ?"(?i)graph";
+
+union = ?"(?i)union";
+optional = ?"(?i)optional";
+minus = ?"(?i)minus";
+exists::Exists = ?"(?i)exists";
+not_exists::NotExists = ?"(?i)not\s+exists";
+
+groupby = ?"(?i)group\s+by";
+orderby = ?"(?i)order\s+by";
+asc::Asc = ?"(?i)asc";
+desc::Desc = ?"(?i)desc";
+limit = ?"(?i)limit";
+
+
+BASE = ?"(?i)base";
+PREFIX = ?"(?i)prefix";
+values = ?"(?i)values";
+undef::Undef = ?"(?i)undef";
+
+distinct::Distinct = ?"(?i)distinct";
+reduced::Reduced = ?"(?i)reduced";
+
+in::In = ?"(?i)in";
+notin::Notin = ?"(?i)not\s+in";
+
+as = ?"(?i)as";
+from = ?"(?i)from";
+bind = ?"(?i)bind";
+filter = ?"(?i)filter";

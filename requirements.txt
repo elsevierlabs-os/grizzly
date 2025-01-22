@@ -1,0 +1,5 @@
+cython==3.0.11
+numpy==2.2.2
+pandas>=0.23.0
+tatsu>=4.2.6
+uplink==0.9.7
